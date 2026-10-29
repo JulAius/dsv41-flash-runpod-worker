@@ -1,7 +1,7 @@
 """Keep one worker warm for a coding session, then let the endpoint scale back to zero.
 
     python3 scripts/session.py on      # 1 active worker, wait until the model answers
-    python3 scripts/session.py off     # back to 0 active workers (the worker stops after its idle timeout)
+    python3 scripts/session.py off     # stop now: 0 workers allowed, so nothing restarts or bills the GPU
     python3 scripts/session.py status  # workers, jobs, balance and current spend
 
 An agent sends the whole conversation on every step. If the worker scales to
@@ -42,8 +42,9 @@ def call(method: str, url: str, body: dict | None = None) -> dict:
         return json.loads(resp.read() or b"{}")
 
 
-def set_min_workers(n: int) -> None:
-    endpoint = call("PATCH", f"https://api.runpod.io/v2/serverless/{ENDPOINT_ID}", {"workers": {"min": n}})
+def set_workers(active: int, maximum: int) -> None:
+    endpoint = call("PATCH", f"https://api.runpod.io/v2/serverless/{ENDPOINT_ID}",
+                    {"workers": {"min": active, "max": maximum}})
     print(f"active workers -> {endpoint['workers']['min']} (max {endpoint['workers']['max']})")
 
 
@@ -85,10 +86,12 @@ def main() -> None:
         sys.exit("RUNPOD_API_KEY is not set")
 
     if args.action == "on":
-        set_min_workers(1)
+        set_workers(1, 1)
         warm_up()
     elif args.action == "off":
-        set_min_workers(0)
+        # max 0 stops the worker right away (no billed idle timeout) and keeps a late request
+        # from starting a new one; "on" allows one worker again.
+        set_workers(0, 0)
     status()
 
 

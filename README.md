@@ -186,7 +186,7 @@ Pendant une session, garder un worker actif (13,98 $/h tant qu'il est allumé) :
 ```bash
 python3 scripts/session.py on  --env /chemin/.env   # 1 worker actif, attend que le modèle réponde
 python3 scripts/session.py status --env /chemin/.env
-python3 scripts/session.py off --env /chemin/.env   # retour à 0 worker actif
+python3 scripts/session.py off --env /chemin/.env   # arrêt immédiat (0 worker max) : plus rien ne démarre
 ```
 
 ### Benchmark sur le matériel réel
