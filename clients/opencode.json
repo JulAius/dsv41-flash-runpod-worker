@@ -1,0 +1,23 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "runpod": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "RunPod DeepSeek",
+      "options": {
+        "baseURL": "https://api.runpod.ai/v2/oqjn0uboys2uoz/openai/v1",
+        "apiKey": "{env:RUNPOD_API_KEY}"
+      },
+      "models": {
+        "deepseek-v4.1-flash-abliterated": {
+          "name": "DeepSeek V4.1 Flash abliterated",
+          "reasoning": true,
+          "interleaved": { "field": "reasoning_content" },
+          "limit": { "context": 131072, "output": 32768 }
+        }
+      }
+    }
+  },
+  "model": "runpod/deepseek-v4.1-flash-abliterated",
+  "small_model": "runpod/deepseek-v4.1-flash-abliterated"
+}

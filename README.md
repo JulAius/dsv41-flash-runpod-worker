@@ -80,13 +80,14 @@ Toutes optionnelles :
 | `VARIANT` | `Mix-256G` | Sous-dossier du modèle sous `MODEL_DIR` |
 | `MODEL_DIR` | `/runpod-volume/models/dsv41-flash-abliterated` | |
 | `MODEL_PATH` | auto | Chemin explicite du shard `-00001-of-*.gguf` |
-| `CTX_SIZE` | `32768` | Contexte total (valeur testée par orcarouter ; le modèle va jusqu'à 1M). À monter si la VRAM le permet |
+| `CTX_SIZE` | `131072` | Contexte total. 128k laisse de la marge aux agents (15 à 30k tokens de prompt système et d'outils par tour). Le modèle va jusqu'à 1M |
 | `PARALLEL` | `1` | Slots llama-server (le contexte est partagé entre slots) |
 | `LAZY_MODE` | `on` | `off` = Engram (110,6 GB) gardé en RAM, si le worker a assez de RAM |
 | `PREWARM_ENGRAM` | `on` | Une fois le modèle chargé, lit une fois le fichier Engram (le plus gros shard) pour remplir le cache de pages, s'il y a assez de RAM. Sinon chaque recherche de ligne pendant la génération va jusqu'au volume réseau |
 | `LLAMA_ARG_*` | | Toute option llama-server, par ex. `LLAMA_ARG_REASONING_EFFORT=low` |
 | `LLAMA_EXTRA_ARGS` | | Flags llama-server supplémentaires |
 | `STARTUP_TIMEOUT` | `3600` | Délai max de chargement du modèle (s) |
+| `BENCHMARK` | | `1` = mode benchmark (voir « Usage agentic »), sans serveur résident |
 
 ## 4. Appels
 
@@ -120,6 +121,59 @@ for chunk in stream:
         delta = chunk.choices[0].delta
         print(getattr(delta, "reasoning_content", None) or delta.content or "", end="", flush=True)
 ```
+
+## Usage agentic (OpenCode, Claude Code)
+
+Réglages par défaut du worker pour un agent avec un seul utilisateur :
+
+- **Contexte 128k** (`CTX_SIZE=131072`). Le cache KV de ce modèle est minuscule, la VRAM n'est pas la limite.
+- **Raisonnement conservé dans l'historique** (défaut de llama-server). Quand des outils sont déclarés,
+  l'encodeur de référence de DeepSeek garde le raisonnement de tous les tours.
+- **Un seul slot** (`PARALLEL=1`). Le bug llama.cpp #30944 (cache de prompt) apparaît surtout avec
+  plusieurs requêtes simultanées.
+
+Le cache de prompt est ce qui rend un agent rapide : à chaque étape, seuls les nouveaux tokens sont lus. Pour
+DeepSeek V4, llama.cpp ne peut pas revenir en arrière dans sa fenêtre glissante (`n_swa` forcé à 0,
+`--swa-full` inutile). Le cache sert donc directement quand le nouveau prompt **prolonge** le précédent.
+Si l'historique change, il faut restaurer un checkpoint, ce qui est le chemin du bug #30944, ou relire tout
+le contexte. Réglages pour l'ajuster, par variables d'endpoint : `LLAMA_ARG_CTX_CHECKPOINTS` (0 = jamais
+de restauration), `LLAMA_ARG_CHECKPOINT_MIN_SPACING_NT`, `LLAMA_ARG_CACHE_RAM`.
+
+### Clients
+
+- **OpenCode** : copier `clients/opencode.json` dans le projet (ou dans `~/.config/opencode/`) et exporter
+  `RUNPOD_API_KEY`. `interleaved: {field: reasoning_content}` renvoie le raisonnement à chaque tour.
+- **Claude Code** : `export RUNPOD_API_KEY=...; source clients/claude-code.env.sh; claude`.
+  `CLAUDE_CODE_ATTRIBUTION_HEADER=0` est indispensable : sinon le début du prompt système change à chaque
+  requête et le cache ne sert jamais.
+
+### Session de travail
+
+Un worker qui s'éteint entre deux étapes coûte un démarrage à froid **et** la perte du cache de prompt.
+Pendant une session, garder un worker actif (13,98 $/h tant qu'il est allumé) :
+
+```bash
+python3 scripts/session.py on  --env /chemin/.env   # 1 worker actif, attend que le modèle réponde
+python3 scripts/session.py status --env /chemin/.env
+python3 scripts/session.py off --env /chemin/.env   # retour à 0 worker actif
+```
+
+### Benchmark sur le matériel réel
+
+Avec `BENCHMARK=1` dans les variables de l'endpoint, un job compare des variantes de `llama-server` sur le
+même worker : vitesse de génération, lecture d'un prompt de ~20k tokens, tour suivant avec cache, réécriture
+de code (là où le décodage spéculatif rapporte).
+
+```json
+{"input": {"benchmark": {"variants": [
+  {"name": "layer"},
+  {"name": "tensor", "args": "-sm tensor"},
+  {"name": "ngram-mod", "args": "--spec-type ngram-mod"},
+  {"name": "dspark", "args": "--spec-type draft-dspark -md /runpod-volume/models/dspark/dspark-DeepSeek-V4.1-Flash-1017-Q8_0.gguf --spec-draft-n-max 3 -ngld 99"}
+]}}}
+```
+
+Retirer `BENCHMARK` ensuite pour revenir au mode normal.
 
 ## Pourquoi pas vLLM
 

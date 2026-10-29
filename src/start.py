@@ -13,6 +13,7 @@ row lookup during generation is a round trip to the network volume.
 Everything is configured through environment variables (see README.md).
 """
 
+import asyncio
 import glob
 import logging
 import os
@@ -26,6 +27,7 @@ import urllib.request
 
 import runpod
 
+import bench
 import handler
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -59,12 +61,14 @@ def build_llama_args(model_path: str) -> list[str]:
         "--port", handler.LLAMA_PORT,
         "--alias", os.getenv("SERVED_MODEL_NAME", "deepseek-v4.1-flash-abliterated"),
         "--n-gpu-layers", "999",
-        "--ctx-size", os.getenv("CTX_SIZE", "32768"),
+        # Agent clients send 15-30K tokens of system prompt and tools on every turn.
+        "--ctx-size", os.getenv("CTX_SIZE", "131072"),
         "--parallel", os.getenv("PARALLEL", "1"),
         "--flash-attn", "on",
         "--jinja",
-        # Drop earlier turns' thinking, like DeepSeek's reference encoder.
-        "--no-reasoning-preserve",
+        # Reasoning stays in the history (llama-server's default): DeepSeek's encoder keeps it
+        # whenever tools are declared, and an append-only prompt is what lets the prompt cache be
+        # reused. Chat-only use can pass --no-reasoning-preserve through LLAMA_EXTRA_ARGS.
         # Engram: rows read from disk on demand instead of being kept resident (see README.md).
         "--load-mode", "mmap",
         "--lazy-mode", os.getenv("LAZY_MODE", "on"),
@@ -139,10 +143,23 @@ def exit_when_dead(proc: subprocess.Popen) -> None:
     os._exit(1)
 
 
+def benchmark_main(model_path: str) -> None:
+    """BENCHMARK=1: no resident llama-server; each job benchmarks the variants it lists."""
+    async def bench_handler(job: dict) -> dict:
+        variants = (job.get("input") or {}).get("benchmark", {}).get("variants") or [{"name": "default"}]
+        return {"results": await asyncio.to_thread(
+            bench.run, variants, build_llama_args(model_path), lambda: prewarm_engram(model_path))}
+
+    runpod.serverless.start({"handler": bench_handler, "concurrency_modifier": lambda _current: 1})
+
+
 def main() -> None:
     model_path = resolve_model_path()
-    argv = build_llama_args(model_path)
     logging.info("Memory available to the page cache: %.0f GB", available_memory() / 1e9)
+    if os.getenv("BENCHMARK"):
+        benchmark_main(model_path)
+        return
+    argv = build_llama_args(model_path)
     logging.info("Starting: %s", shlex.join(argv))
     proc = subprocess.Popen(argv)
     threading.Thread(target=exit_when_dead, args=(proc,), daemon=True).start()
