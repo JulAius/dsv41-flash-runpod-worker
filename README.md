@@ -37,7 +37,7 @@ Prix serverless renvoyés par l'API RunPod le 29/10/2026 :
 | Téléchargement Mix-256G sur le volume (Pod CPU) | 11 min (~520 MB/s) |
 
 orcarouter annonce ~70 tok/s sur 2× H200. L'écart vient probablement de la lecture de l'Engram sur le volume
-réseau (piste : `LAZY_MODE=off`, si la RAM du worker suffit).
+réseau : llama.cpp la mappe avec `MADV_RANDOM` (pas de lecture anticipée). D'où `PREWARM_ENGRAM` (mesures 1 et 2 faites sans).
 
 ## 1. Network volume + téléchargement
 
@@ -83,6 +83,7 @@ Toutes optionnelles :
 | `CTX_SIZE` | `32768` | Contexte total (valeur testée par orcarouter ; le modèle va jusqu'à 1M). À monter si la VRAM le permet |
 | `PARALLEL` | `1` | Slots llama-server (le contexte est partagé entre slots) |
 | `LAZY_MODE` | `on` | `off` = Engram (110,6 GB) gardé en RAM, si le worker a assez de RAM |
+| `PREWARM_ENGRAM` | `on` | Une fois le modèle chargé, lit une fois le fichier Engram (le plus gros shard) pour remplir le cache de pages, s'il y a assez de RAM. Sinon chaque recherche de ligne pendant la génération va jusqu'au volume réseau |
 | `LLAMA_ARG_*` | | Toute option llama-server, par ex. `LLAMA_ARG_REASONING_EFFORT=low` |
 | `LLAMA_EXTRA_ARGS` | | Flags llama-server supplémentaires |
 | `STARTUP_TIMEOUT` | `3600` | Délai max de chargement du modèle (s) |
