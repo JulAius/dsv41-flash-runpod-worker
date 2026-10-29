@@ -7,11 +7,12 @@ Accepted job["input"] shapes:
 2. Shorthand for /run and /runsync (every key is passed to /v1/chat/completions):
        {"messages": [...], "max_tokens": 1024, "stream": false}
 
-With "stream": true the SSE lines are yielded as they arrive; otherwise the
+With "stream": true the SSE bytes are yielded as they arrive; otherwise the
 JSON response is yielded once.
 """
 
 import asyncio
+import codecs
 import logging
 import os
 import threading
@@ -70,9 +71,18 @@ async def handler(job: dict) -> AsyncGenerator[Any, None]:
                     return
 
                 if isinstance(body, dict) and body.get("stream") is True:
-                    # Line by line so a multi-byte UTF-8 character is never split across chunks.
-                    async for line in resp.content:
-                        yield line.decode("utf-8")
+                    # Each yield is one round trip to RunPod (~0.15 s), sent one after the other.
+                    # Yield whatever arrived meanwhile rather than line by line, or the stream is
+                    # capped at a few tokens per second. The incremental decoder keeps multi-byte
+                    # UTF-8 characters whole across chunk boundaries.
+                    decoder = codecs.getincrementaldecoder("utf-8")()
+                    async for chunk in resp.content.iter_any():
+                        text = decoder.decode(chunk)
+                        if text:
+                            yield text
+                    tail = decoder.decode(b"", final=True)
+                    if tail:
+                        yield tail
                 else:
                     yield await resp.json(content_type=None)
     except aiohttp.ClientError as e:
