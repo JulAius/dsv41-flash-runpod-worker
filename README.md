@@ -86,6 +86,7 @@ Les deux occupent ~355 GB des 370 GB du volume.
 | Execution timeout | 3600 s |
 | FlashBoot | Activé |
 | Network volume | Celui du modèle |
+| Variables | `CTX_SIZE=131072`, `LLAMA_ARG_CTX_CHECKPOINTS=0` (contournement du bug #30944) |
 | Container disk | 20 GB |
 | CUDA | ≥ 12.8 |
 
@@ -156,7 +157,10 @@ Le cache de prompt est ce qui rend un agent rapide : à chaque étape, seuls les
 DeepSeek V4, llama.cpp ne peut pas revenir en arrière dans sa fenêtre glissante (`n_swa` forcé à 0,
 `--swa-full` inutile). Le cache sert donc directement quand le nouveau prompt **prolonge** le précédent.
 Si l'historique change, il faut restaurer un checkpoint, ce qui est le chemin du bug #30944, ou relire tout
-le contexte. Réglages pour l'ajuster, par variables d'endpoint : `LLAMA_ARG_CTX_CHECKPOINTS` (0 = jamais
+le contexte. **En vraie session OpenCode, l'historique est parfois raccourci (`f_keep = 0.726` dans les logs) :
+llama-server restaure alors un checkpoint, et la réponse suivante contenait un appel d'outil corrompu
+(balises DSML cassées). D'où `LLAMA_ARG_CTX_CHECKPOINTS=0` sur l'endpoint**, qui coûte une relecture
+complète (~20–25 s pour 20k tokens) chaque fois que l'historique change. Réglages pour l'ajuster, par variables d'endpoint : `LLAMA_ARG_CTX_CHECKPOINTS` (0 = jamais
 de restauration), `LLAMA_ARG_CHECKPOINT_MIN_SPACING_NT`, `LLAMA_ARG_CACHE_RAM`.
 
 ### Clients
