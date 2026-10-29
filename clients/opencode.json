@@ -6,7 +6,7 @@
       "name": "RunPod DeepSeek",
       "options": {
         "baseURL": "https://api.runpod.ai/v2/oqjn0uboys2uoz/openai/v1",
-        "apiKey": "{env:RUNPOD_API_KEY}",
+        "apiKey": "{file:~/.config/opencode/runpod.key}",
         "headerTimeout": 900000
       },
       "models": {
@@ -19,11 +19,27 @@
           "limit": {
             "context": 131072,
             "output": 32768
-          }
+          },
+          "tool_call": true,
+          "temperature": false,
+          "attachment": false
         }
       }
     }
   },
   "model": "runpod/deepseek-v4.1-flash-abliterated",
-  "small_model": "runpod/deepseek-v4.1-flash-abliterated"
+  "small_model": "runpod/deepseek-v4.1-flash-abliterated",
+  "permission": {
+    "*": "allow",
+    "websearch": "allow",
+    "webfetch": "allow",
+    "external_directory": "allow",
+    "bash": {
+      "*": "allow",
+      "rm -rf *": "ask",
+      "sudo *": "ask",
+      "git push *": "ask"
+    },
+    "doom_loop": "ask"
+  }
 }

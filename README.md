@@ -167,6 +167,9 @@ de restauration), `LLAMA_ARG_CHECKPOINT_MIN_SPACING_NT`, `LLAMA_ARG_CACHE_RAM`.
   terminal : `{env:RUNPOD_API_KEY}` y arrive vide et RunPod répond 401 « no token provided ». Mettre la clé seule
   dans un fichier (`chmod 600`) et utiliser `"apiKey": "{file:/chemin/runpod.key}"`, puis
   `opencode service restart`.
+  L'outil `websearch` n'existe pour un fournisseur personnalisé que si `OPENCODE_ENABLE_EXA=1` est dans
+  l'environnement du service (ajouté à `~/.bashrc`, puis `opencode service restart` depuis un nouveau terminal).
+  La config d'exemple accepte les outils sans confirmation, sauf `rm -rf`, `sudo`, `git push` et les boucles.
 - **Claude Code** : `export RUNPOD_API_KEY=...; source clients/claude-code.env.sh; claude`.
   `CLAUDE_CODE_ATTRIBUTION_HEADER=0` est indispensable : sinon le début du prompt système change à chaque
   requête et le cache ne sert jamais.
