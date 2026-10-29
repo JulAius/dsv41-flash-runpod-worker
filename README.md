@@ -25,6 +25,20 @@ Prix serverless renvoyés par l'API RunPod le 29/10/2026 :
 | 3× RTX PRO 6000 | 288 GB | 10,47 $/h | Mix-256G, réparti sur 3 GPU PCIe : plus lent |
 | 1× B200 | 180 GB | 10,79 $/h | Seulement les versions 1-bit (Mix-128G, huihui UD-IQ1_S) |
 
+## Mesures (29/10/2026, 2× H200, US-CA-2, volume HP)
+
+| | Résultat |
+|---|---|
+| Génération | **44,7 tok/s** (869 tokens en 19,4 s) |
+| Lecture du prompt | ~120 tok/s (prompt court de 45 tokens, peu représentatif) |
+| Attente, worker chaud | 0,1 s |
+| Chargement du modèle, fichiers déjà en cache sur la machine | 102 s |
+| Chargement du modèle, machine neuve | Plus de 8 min (voir « Démarrage à froid » plus bas) |
+| Téléchargement Mix-256G sur le volume (Pod CPU) | 11 min (~520 MB/s) |
+
+orcarouter annonce ~70 tok/s sur 2× H200. L'écart vient probablement de la lecture de l'Engram sur le volume
+réseau (piste : `LAZY_MODE=off`, si la RAM du worker suffit).
+
 ## 1. Network volume + téléchargement
 
 Volume HP de 370 GB dans US-CA-2, puis un Pod CPU monté sur `/runpod-volume` (même chemin qu'en serverless) :
@@ -117,7 +131,10 @@ for chunk in stream:
 
 ## Points à vérifier au premier déploiement
 
-- **Cold start** : ~236 GB à lire depuis le volume, facturés. Le volume HP aide, mais compter plusieurs minutes.
+- **Démarrage à froid** : ~236 GB à lire depuis le volume, facturés. Au premier test, RunPod a arrêté le
+  conteneur au bout de 8 min 03 s : un worker qui n'a pas lancé `runpod.serverless.start` après ~8 min est tué.
+  `start.py` lance donc la boucle de jobs tout de suite, et le handler fait attendre chaque job jusqu'à ce que
+  `llama-server` soit prêt.
 - **Engram sur network volume** : avec `LAZY_MODE=on`, les lignes de la table sont lues à la demande sur le
   volume réseau. orcarouter recommande du NVMe local ; si la génération est lente, essayer `LAZY_MODE=off`.
 - **Test local** : `python3 /src/start.py --rp_serve_api` lance une API RunPod locale sur le port 8000

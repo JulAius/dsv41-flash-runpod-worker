@@ -11,8 +11,10 @@ With "stream": true the SSE lines are yielded as they arrive; otherwise the
 JSON response is yielded once.
 """
 
+import asyncio
 import logging
 import os
+import threading
 from typing import Any, AsyncGenerator, Optional, Tuple
 
 import aiohttp
@@ -20,6 +22,9 @@ import aiohttp
 LLAMA_PORT = os.getenv("LLAMA_PORT", "8080")
 LLAMA_BASE_URL = f"http://127.0.0.1:{LLAMA_PORT}"
 REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "3600"))
+
+# Set by start.py once llama-server has loaded the model. Jobs taken earlier wait for it.
+llama_ready = threading.Event()
 
 CHAT_ROUTE = "/v1/chat/completions"
 
@@ -49,6 +54,10 @@ async def handler(job: dict) -> AsyncGenerator[Any, None]:
     except ValueError as e:
         yield _error(str(e))
         return
+
+    # start.py exits the worker if the model never loads, so this cannot spin forever.
+    while not llama_ready.is_set():
+        await asyncio.sleep(2)
 
     timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
     try:

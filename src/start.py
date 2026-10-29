@@ -1,9 +1,10 @@
-"""Worker entrypoint: start llama-server, wait for the model to load, then pull RunPod jobs.
+"""Worker entrypoint: start llama-server and the RunPod job loop side by side.
 
-Same pattern as runpod-workers/worker-vllm: the RunPod job loop only starts
-once llama-server answers /health with 200, so no job is taken before the
-weights are in VRAM. If llama-server dies later, the whole worker exits so
-RunPod replaces it instead of keeping a broken worker in the pool.
+RunPod stops a worker whose job loop has not started after about 8 minutes,
+and a cold read of ~240 GB from the network volume takes longer than that.
+So the job loop starts right away and the handler holds each job until
+llama-server answers /health with 200. If llama-server dies, or is still not
+ready after STARTUP_TIMEOUT, the whole worker exits so RunPod replaces it.
 
 Everything is configured through environment variables (see README.md).
 """
@@ -13,7 +14,6 @@ import logging
 import os
 import shlex
 import subprocess
-import sys
 import threading
 import time
 import urllib.error
@@ -73,24 +73,21 @@ def build_llama_args(model_path: str) -> list[str]:
     return argv
 
 
-def wait_until_ready(proc: subprocess.Popen) -> None:
-    """Poll /health until the model is loaded; exit if llama-server dies or the timeout expires."""
+def wait_until_ready(proc: subprocess.Popen, started: float) -> None:
+    """Poll /health until the model is loaded, then let jobs through; kill llama-server on timeout."""
     url = f"{handler.LLAMA_BASE_URL}/health"
-    deadline = time.monotonic() + STARTUP_TIMEOUT
-    while time.monotonic() < deadline:
-        if proc.poll() is not None:
-            logging.error("llama-server exited during startup with code %s", proc.returncode)
-            sys.exit(1)
+    while time.monotonic() < started + STARTUP_TIMEOUT:
         try:
             with urllib.request.urlopen(url, timeout=10) as resp:
                 if resp.status == 200:
+                    logging.info("llama-server ready after %.0f s", time.monotonic() - started)
+                    handler.llama_ready.set()
                     return
         except (urllib.error.URLError, ConnectionError, OSError):
             pass  # 503 while loading, or not listening yet
         time.sleep(HEALTH_POLL_INTERVAL)
     logging.error("llama-server not ready after %s s", STARTUP_TIMEOUT)
-    proc.kill()
-    sys.exit(1)
+    proc.kill()  # exit_when_dead then stops the worker
 
 
 def exit_when_dead(proc: subprocess.Popen) -> None:
@@ -103,11 +100,8 @@ def main() -> None:
     argv = build_llama_args(resolve_model_path())
     logging.info("Starting: %s", shlex.join(argv))
     proc = subprocess.Popen(argv)
-
-    started = time.monotonic()
-    wait_until_ready(proc)
-    logging.info("llama-server ready after %.0f s", time.monotonic() - started)
     threading.Thread(target=exit_when_dead, args=(proc,), daemon=True).start()
+    threading.Thread(target=wait_until_ready, args=(proc, time.monotonic()), daemon=True).start()
 
     # One job per llama-server slot: extra requests go to the RunPod queue
     # (and may start another worker) instead of piling up on a busy one.
