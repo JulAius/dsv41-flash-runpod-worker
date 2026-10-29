@@ -161,8 +161,12 @@ de restauration), `LLAMA_ARG_CHECKPOINT_MIN_SPACING_NT`, `LLAMA_ARG_CACHE_RAM`.
 
 ### Clients
 
-- **OpenCode** : copier `clients/opencode.json` dans le projet (ou dans `~/.config/opencode/`) et exporter
-  `RUNPOD_API_KEY`. `interleaved: {field: reasoning_content}` renvoie le raisonnement à chaque tour.
+- **OpenCode** : copier `clients/opencode.json` dans le projet (ou dans `~/.config/opencode/`).
+  `interleaved: {field: reasoning_content}` renvoie le raisonnement à chaque tour. OpenCode v2 lit la config
+  dans un service d'arrière-plan (`opencode serve --service`) qui ne voit pas les variables exportées dans ton
+  terminal : `{env:RUNPOD_API_KEY}` y arrive vide et RunPod répond 401 « no token provided ». Mettre la clé seule
+  dans un fichier (`chmod 600`) et utiliser `"apiKey": "{file:/chemin/runpod.key}"`, puis
+  `opencode service restart`.
 - **Claude Code** : `export RUNPOD_API_KEY=...; source clients/claude-code.env.sh; claude`.
   `CLAUDE_CODE_ATTRIBUTION_HEADER=0` est indispensable : sinon le début du prompt système change à chaque
   requête et le cache ne sert jamais.
