@@ -27,17 +27,25 @@ Prix serverless renvoyés par l'API RunPod le 29/10/2026 :
 
 ## Mesures (29/10/2026, 2× H200, US-CA-2, volume HP)
 
+Benchmark sur le worker serverless (mode `BENCHMARK=1`), contexte 128k, Engram préchauffé :
+
+| Variante | Génération (texte) | Lecture d'un prompt de 22,7k tokens | Réécriture de code | Tour suivant (cache) |
+|---|---|---|---|---|
+| `-ub 512` (défaut llama.cpp) | 48,9 tok/s | 674 tok/s (34 s) | 61,2 tok/s | 0,22 s |
+| `-sm tensor` | Plantage | | | |
+| **`-ub 2048 -b 4096`** | 52,9 tok/s | **1 217 tok/s (19 s)** | 59,7 tok/s | 0,22 s |
+| `--spec-type ngram-mod` | 52,3 tok/s | 847 tok/s | 58,7 tok/s | 0,22 s |
+| **DSpark** (`draft-dspark`, n-max 3) | 52,9 tok/s (38 % des tokens proposés acceptés) | 849 tok/s | **109,5 tok/s** (99,7 % acceptés) | 0,19 s |
+
+Le worker active par défaut `-ub 2048 -b 4096` et DSpark (si le brouillon est sur le volume). Autres mesures :
+
 | | Résultat |
 |---|---|
-| Génération | **44,7 tok/s** (869 tokens en 19,4 s) |
-| Lecture du prompt | ~120 tok/s (prompt court de 45 tokens, peu représentatif) |
+| Démarrage à froid complet (requête → réponse), modèle déjà en cache sur la machine | 2 min 47 s (chargement 65 s) |
+| Préchauffage Engram | 111 GB en 130 s (0,85 GB/s) ; la machine a ~2 TB de RAM |
 | Attente, worker chaud | 0,1 s |
-| Chargement du modèle, fichiers déjà en cache sur la machine | 102 s |
-| Chargement du modèle, machine neuve | Plus de 8 min (voir « Démarrage à froid » plus bas) |
+| Appel d'outil, route Anthropic `/v1/messages`, streaming | OK |
 | Téléchargement Mix-256G sur le volume (Pod CPU) | 11 min (~520 MB/s) |
-
-orcarouter annonce ~70 tok/s sur 2× H200. L'écart vient probablement de la lecture de l'Engram sur le volume
-réseau : llama.cpp la mappe avec `MADV_RANDOM` (pas de lecture anticipée). D'où `PREWARM_ENGRAM` (mesures 1 et 2 faites sans).
 
 ## 1. Network volume + téléchargement
 
@@ -50,8 +58,16 @@ hf download orcarouter/DeepSeek-V4.1-Flash-1017-abliterated-GGUF \
   --local-dir /runpod-volume/models/dsv41-flash-abliterated
 ```
 
+Puis le brouillon DSpark (8 GB, décodage spéculatif) :
+
+```bash
+hf download unsloth/DeepSeek-V4.1-Flash-1017-GGUF dspark-DeepSeek-V4.1-Flash-1017-Q8_0.gguf \
+  --local-dir /runpod-volume/models/dspark
+```
+
 Ensuite, supprimer le Pod. `start.py` prend automatiquement
-`/runpod-volume/models/dsv41-flash-abliterated/Mix-256G/*-00001-of-*.gguf`.
+`/runpod-volume/models/dsv41-flash-abliterated/Mix-256G/*-00001-of-*.gguf` et le brouillon s'il est présent.
+Les deux occupent ~355 GB des 370 GB du volume.
 
 > Ne pas utiliser le champ **Model** (model caching) de l'endpoint : il télécharge *toutes* les versions du
 > repo.
@@ -82,6 +98,8 @@ Toutes optionnelles :
 | `MODEL_PATH` | auto | Chemin explicite du shard `-00001-of-*.gguf` |
 | `CTX_SIZE` | `131072` | Contexte total. 128k laisse de la marge aux agents (15 à 30k tokens de prompt système et d'outils par tour). Le modèle va jusqu'à 1M |
 | `PARALLEL` | `1` | Slots llama-server (le contexte est partagé entre slots) |
+| `UBATCH` / `BATCH` | `2048` / `4096` | Taille des lots pour lire le prompt (×1,8 par rapport au défaut 512 de llama.cpp) |
+| `DSPARK_MODEL` | `/runpod-volume/models/dspark/dspark-DeepSeek-V4.1-Flash-1017-Q8_0.gguf` | Brouillon DSpark. Activé seulement si le fichier existe ; vide = désactivé |
 | `LAZY_MODE` | `on` | `off` = Engram (110,6 GB) gardé en RAM, si le worker a assez de RAM |
 | `PREWARM_ENGRAM` | `on` | Une fois le modèle chargé, lit une fois le fichier Engram (le plus gros shard) pour remplir le cache de pages, s'il y a assez de RAM. Sinon chaque recherche de ligne pendant la génération va jusqu'au volume réseau |
 | `LLAMA_ARG_*` | | Toute option llama-server, par ex. `LLAMA_ARG_REASONING_EFFORT=low` |
@@ -173,7 +191,8 @@ de code (là où le décodage spéculatif rapporte).
 ]}}}
 ```
 
-Retirer `BENCHMARK` ensuite pour revenir au mode normal.
+Les arguments de chaque variante s'ajoutent aux réglages par défaut du worker, DSpark compris (`DSPARK_MODEL=` dans
+l'endpoint pour mesurer sans). Retirer `BENCHMARK` ensuite pour revenir au mode normal.
 
 ## Pourquoi pas vLLM
 

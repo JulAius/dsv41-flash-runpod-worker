@@ -37,6 +37,8 @@ MODEL_DIR = os.getenv("MODEL_DIR", "/runpod-volume/models/dsv41-flash-abliterate
 VARIANT = os.getenv("VARIANT", "Mix-256G")
 STARTUP_TIMEOUT = int(os.getenv("STARTUP_TIMEOUT", "3600"))  # seconds; loading ~240 GB from a network volume is slow
 PREWARM_ENGRAM = os.getenv("PREWARM_ENGRAM", "on").lower() in ("on", "1", "true", "yes")
+# Empty string disables speculative decoding.
+DSPARK_MODEL = os.getenv("DSPARK_MODEL", "/runpod-volume/models/dspark/dspark-DeepSeek-V4.1-Flash-1017-Q8_0.gguf")
 HEALTH_POLL_INTERVAL = 5  # seconds
 READ_CHUNK = 64 * 1024 * 1024
 
@@ -64,6 +66,9 @@ def build_llama_args(model_path: str) -> list[str]:
         # Agent clients send 15-30K tokens of system prompt and tools on every turn.
         "--ctx-size", os.getenv("CTX_SIZE", "131072"),
         "--parallel", os.getenv("PARALLEL", "1"),
+        # 2048 instead of 512 reads a 22K-token agent prompt 1.8x faster on 2x H200 (README.md).
+        "--ubatch-size", os.getenv("UBATCH", "2048"),
+        "--batch-size", os.getenv("BATCH", "4096"),
         "--flash-attn", "on",
         "--jinja",
         # Reasoning stays in the history (llama-server's default): DeepSeek's encoder keeps it
@@ -80,6 +85,11 @@ def build_llama_args(model_path: str) -> list[str]:
         # The Engram table is a CPU gather table; PR #30817's loader forces this anyway.
         "--override-tensor", "per_layer_token_embd.weight=CPU",
     ]
+    if DSPARK_MODEL and os.path.exists(DSPARK_MODEL):
+        # DeepSeek's DSpark drafter: 1.8x faster when the output repeats the context (code
+        # rewrites), same speed on free text. It reuses the target's embeddings and output head.
+        argv += ["--spec-type", "draft-dspark", "--model-draft", DSPARK_MODEL,
+                 "--spec-draft-n-max", "3", "--n-gpu-layers-draft", "99"]
     argv += shlex.split(os.getenv("LLAMA_EXTRA_ARGS", ""))
     return argv
 
