@@ -44,7 +44,9 @@ Le worker active par défaut `-ub 2048 -b 4096` et DSpark (si le brouillon est s
 | Démarrage à froid complet (requête → réponse), modèle déjà en cache sur la machine | 2 min 47 s (chargement 65 s) |
 | Préchauffage Engram | 111 GB en 130 s (0,85 GB/s) ; la machine a ~2 TB de RAM |
 | Attente, worker chaud | 0,1 s |
-| Appel d'outil, route Anthropic `/v1/messages`, streaming | OK |
+| Streaming via RunPod (route OpenAI), de la requête au dernier token | 34,9 tok/s pour 332 tokens |
+| Réécriture de code via l'endpoint (DSpark actif) | 96,1 tok/s, 745/747 propositions acceptées |
+| Appel d'outil, route Anthropic `/v1/messages` en streaming | OK |
 | Téléchargement Mix-256G sur le volume (Pod CPU) | 11 min (~520 MB/s) |
 
 ## 1. Network volume + téléchargement
